@@ -1475,7 +1475,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	, const global float* mass // argument order is important
 )+"#endif"+R( // SURFACE
 )+"#ifdef TEMPERATURE"+R(
-	, global fpxx* gi, global float* T // argument order is important
+	, global fpxx* gi, global float* T, const global float* k, const global float* rhocP, const global uchar* matType // argument order is important
 )+"#endif"+R( // TEMPERATURE
 )+") {"+R( // stream_collide()
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
@@ -1546,15 +1546,67 @@ string opencl_c_container() { return R( // ########################## begin of O
 			for(uint i=0u; i<7u; i++) Tn += ghn[i]; // calculate temperature from g
 			Tn += 1.0f; // add 1.0f last to avoid digit extinction effects when summing up gi (perturbation method / DDF-shifting)
 		}
-		float geq[7]; // cache f_equilibrium[n]
+		
+		// Conjugate heat transfer implementation
+		const float kn = k[n]; // local thermal conductivity
+		const float rhocPn = rhocP[n]; // local heat capacity (rho*c_p)
+		const float rho_cp_ref = 1.0f; // reference heat capacity (can be made configurable)
+		const float alpha_local = kn / rhocPn; // local thermal diffusivity
+		const float sigma = rhocPn / rho_cp_ref; // heat capacity ratio
+		const float w_T_local = 1.0f/(2.0f*alpha_local+0.5f); // local relaxation parameter
+		
+		float geq[7]; // cache g_equilibrium[n]
 		calculate_g_eq(Tn, uxn, uyn, uzn, geq); // calculate equilibrium DDFs
+		
 		if(flagsn&TYPE_T) {
 			for(uint i=0u; i<7u; i++) ghn[i] = geq[i]; // just write geq to ghn (no collision)
 		} else {
 )+"#ifdef UPDATE_FIELDS"+R(
 			T[n] = Tn; // update temperature field
 )+"#endif"+R( // UPDATE_FIELDS
-			for(uint i=0u; i<7u; i++) ghn[i] = fma(1.0f-def_w_T, ghn[i], def_w_T*geq[i]); // perform collision
+			
+			// Compute source term for conjugate heat transfer
+			float source_term = 0.0f;
+			if(sigma > 0.0f) {
+				// Calculate non-equilibrium heat flux: sum of (gi - gi_eq) * ci
+				float3 q_neq = (float3)(0.0f, 0.0f, 0.0f);
+				const float c[7][3] = {{0,0,0}, {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}}; // D3Q7 velocity vectors
+				for(uint i=0u; i<7u; i++) {
+					const float g_neq = ghn[i] - geq[i];
+					q_neq.x += g_neq * c[i][0];
+					q_neq.y += g_neq * c[i][1]; 
+					q_neq.z += g_neq * c[i][2];
+				}
+				
+				// Calculate gradient of 1/sigma using finite differences
+				float3 grad_inv_sigma = (float3)(0.0f, 0.0f, 0.0f);
+				const float sigma_neighbors[7] = {
+					sigma, // center
+					rhocP[j7[1]]/rho_cp_ref, rhocP[j7[2]]/rho_cp_ref, // x neighbors  
+					rhocP[j7[3]]/rho_cp_ref, rhocP[j7[4]]/rho_cp_ref, // y neighbors
+					rhocP[j7[5]]/rho_cp_ref, rhocP[j7[6]]/rho_cp_ref  // z neighbors
+				};
+				
+				// Central difference approximation of gradient of 1/sigma
+				if(sigma_neighbors[1] > 0.0f && sigma_neighbors[2] > 0.0f) {
+					grad_inv_sigma.x = 0.5f * (1.0f/sigma_neighbors[1] - 1.0f/sigma_neighbors[2]);
+				}
+				if(sigma_neighbors[3] > 0.0f && sigma_neighbors[4] > 0.0f) {
+					grad_inv_sigma.y = 0.5f * (1.0f/sigma_neighbors[3] - 1.0f/sigma_neighbors[4]);
+				}
+				if(sigma_neighbors[5] > 0.0f && sigma_neighbors[6] > 0.0f) {
+					grad_inv_sigma.z = 0.5f * (1.0f/sigma_neighbors[5] - 1.0f/sigma_neighbors[6]);
+				}
+				
+				// Source term: (k/rho_cp_ref) * q_neq · grad(1/sigma)
+				source_term = (kn/rho_cp_ref) * dot(q_neq, grad_inv_sigma);
+			}
+			
+			// Modified collision with source term
+			for(uint i=0u; i<7u; i++) {
+				ghn[i] = fma(1.0f-w_T_local, ghn[i], w_T_local*geq[i]);
+				ghn[i] += source_term * (1.0f - w_T_local*0.5f) * geq[i]; // Add source term contribution
+			}
 		}
 		store_g(n, ghn, gi, j7, t); // perform streaming (part 1)
 		fxn -= fx*def_beta*(Tn-def_T_avg);

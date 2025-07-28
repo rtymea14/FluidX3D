@@ -79,6 +79,9 @@ public:
 #endif // SURFACE
 #ifdef TEMPERATURE
 	Memory<float> T; // temperature of every cell
+	Memory<float> k; // thermal conductivity of every cell
+	Memory<float> rhocP; // heat capacity (rho*c_p) of every cell
+	Memory<uchar> matType; // material type: 0=fluid, 1=solid
 #endif // TEMPERATURE
 #ifdef PARTICLES
 	Memory<float> particles; // particle positions
@@ -414,6 +417,9 @@ public:
 #endif // SURFACE
 #ifdef TEMPERATURE
 	Memory_Container<float> T; // temperature of every cell
+	Memory_Container<float> k; // thermal conductivity of every cell
+	Memory_Container<float> rhocP; // heat capacity (rho*c_p) of every cell
+	Memory_Container<uchar> matType; // material type: 0=fluid, 1=solid
 #endif // TEMPERATURE
 #ifdef PARTICLES
 	Memory<float>* particles; // particle positions

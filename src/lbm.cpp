@@ -32,6 +32,9 @@ uint bytes_per_cell_host() { // returns the number of Bytes per cell allocated i
 #endif // SURFACE
 #ifdef TEMPERATURE
 	bytes_per_cell += 4u; // T
+	bytes_per_cell += 4u; // k  
+	bytes_per_cell += 4u; // rhocP
+	bytes_per_cell += 1u; // matType
 #endif // TEMPERATURE
 	return bytes_per_cell;
 }
@@ -45,6 +48,9 @@ uint bytes_per_cell_device() { // returns the number of Bytes per cell allocated
 #endif // SURFACE
 #ifdef TEMPERATURE
 	bytes_per_cell += 7u*sizeof(fpxx)+4u; // gi, T
+	bytes_per_cell += 4u; // k
+	bytes_per_cell += 4u; // rhocP  
+	bytes_per_cell += 1u; // matType
 #endif // TEMPERATURE
 	return bytes_per_cell;
 }
@@ -159,8 +165,11 @@ void LBM_Domain::allocate(Device& device) {
 #ifdef TEMPERATURE
 	gi = Memory<fpxx>(device, N, 7u, false);
 	T = Memory<float>(device, N, 1u, true, true, 1.0f);
+	k = Memory<float>(device, N, 1u, true, true, 1.0f); // thermal conductivity
+	rhocP = Memory<float>(device, N, 1u, true, true, 1.0f); // heat capacity
+	matType = Memory<uchar>(device, N, 1u, true, true, 0); // material type: 0=fluid, 1=solid
 	kernel_initialize.add_parameters(gi, T);
-	kernel_stream_collide.add_parameters(gi, T);
+	kernel_stream_collide.add_parameters(gi, T, k, rhocP, matType);
 	kernel_update_fields.add_parameters(gi, T);
 #endif // TEMPERATURE
 
@@ -724,6 +733,15 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 		Memory<float>** buffers_T = new Memory<float>*[D];
 		for(uint d=0u; d<D; d++) buffers_T[d] = &(lbm_domain[d]->T);
 		T = Memory_Container(this, buffers_T, "T");
+		Memory<float>** buffers_k = new Memory<float>*[D];
+		for(uint d=0u; d<D; d++) buffers_k[d] = &(lbm_domain[d]->k);
+		k = Memory_Container(this, buffers_k, "k");
+		Memory<float>** buffers_rhocP = new Memory<float>*[D];
+		for(uint d=0u; d<D; d++) buffers_rhocP[d] = &(lbm_domain[d]->rhocP);
+		rhocP = Memory_Container(this, buffers_rhocP, "rhocP");
+		Memory<uchar>** buffers_matType = new Memory<uchar>*[D];
+		for(uint d=0u; d<D; d++) buffers_matType[d] = &(lbm_domain[d]->matType);
+		matType = Memory_Container(this, buffers_matType, "matType");
 #endif // TEMPERATURE
 	} {
 #ifdef PARTICLES
@@ -858,6 +876,9 @@ void LBM::initialize() { // write all data fields to device and call kernel_init
 #endif // SURFACE
 #ifdef TEMPERATURE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->T.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->k.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->rhocP.enqueue_write_to_device();
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->matType.enqueue_write_to_device();
 #endif // TEMPERATURE
 #ifdef PARTICLES
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->particles.enqueue_write_to_device();
