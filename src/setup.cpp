@@ -2,8 +2,9 @@
 
 
 
-#ifdef BENCHMARK
+//#ifdef BENCHMARK
 #include "info.hpp"
+/*
 void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK, optionally FP16S or FP16C
 	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
 	uint mlups = 0u; {
@@ -32,8 +33,69 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #if defined(_WIN32)
 	wait();
 #endif // Windows
+} 
+*/
+
+
+void main_setup() { // Conjugate heat transfer example; required extensions in defines.hpp: TEMPERATURE
+	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
+	LBM lbm(64u, 64u, 64u, 1u, 1u, 1u, 0.02f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f);
+	// ###################################################################################### define geometry ######################################################################################
+	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); 
+	parallel_for(lbm.get_N(), [&](ulong n) { 
+		uint x=0u, y=0u, z=0u; 
+		lbm.coordinates(n, x, y, z);
+		
+		// Initialize default fluid properties 
+		lbm.k[n] = 1.0f;      // thermal conductivity of fluid
+		lbm.rhocP[n] = 1.0f;  // heat capacity of fluid
+		lbm.matType[n] = 0;   // 0 = fluid
+		lbm.T[n] = 1.0f;      // initial temperature
+		
+		// Create a solid block in the center with different thermal properties
+		const uint centerX = Nx/2, centerY = Ny/2, centerZ = Nz/2;
+		const uint blockSize = 16;
+		if(x >= centerX - blockSize/2 && x <= centerX + blockSize/2 &&
+		   y >= centerY - blockSize/2 && y <= centerY + blockSize/2 &&
+		   z >= centerZ - blockSize/2 && z <= centerZ + blockSize/2) {
+			lbm.flags[n] = TYPE_S; // solid boundary
+			lbm.k[n] = 5.0f;       // higher thermal conductivity for solid
+			lbm.rhocP[n] = 2.0f;   // different heat capacity for solid
+			lbm.matType[n] = 1;    // 1 = solid
+			lbm.T[n] = 2.0f;       // initial higher temperature in solid
+		}
+		
+		// Set temperature boundaries on top and bottom
+		if(z == 0) {
+			lbm.T[n] = 0.5f;       // cold bottom
+			lbm.flags[n] = TYPE_T; // temperature boundary
+		} else if(z == Nz-1) {
+			lbm.T[n] = 1.5f;       // hot top  
+			lbm.flags[n] = TYPE_T; // temperature boundary
+		}
+		
+		// Set solid walls on sides
+		if(x == 0 || x == Nx-1 || y == 0 || y == Ny-1) {
+			lbm.flags[n] = TYPE_S; // solid boundary
+		}
+	});
+	
+	// ####################################################################### run simulation, export images and data ##########################################################################
+	print_info("Running conjugate heat transfer simulation...");
+	lbm.run(0u); // initialize simulation
+	
+	// Run simulation and save temperature field periodically
+	for(uint i = 0; i < 1000; i++) {
+		lbm.run(10u); // run 10 time steps
+		if(i % 100 == 0) {
+			print_info("Time step: " + to_string(i*10) + ", saving temperature field...");
+			lbm.T.read_from_device(); // read temperature data from device
+			// Temperature field is now available in lbm.T for analysis
+		}
+	}
+	
+	print_info("Conjugate heat transfer simulation completed.");
 } /**/
-#endif // BENCHMARK
 
 
 
