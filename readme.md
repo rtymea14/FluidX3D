@@ -119,4 +119,6 @@ The conjugate heat transfer implementation maintains FluidX3D's high performance
 
 ---
 
-For complete documentation of FluidX3D features, see [DOCUMENTATION.md](DOCUMENTATION.md) and the main [README.md](README.md).
+**Note**: This readme.md file specifically documents the conjugate heat transfer implementation. For complete FluidX3D documentation, performance benchmarks, and general usage instructions, refer to:
+- [README.md](README.md) - Main project documentation with comprehensive feature overview
+- [DOCUMENTATION.md](DOCUMENTATION.md) - Detailed usage guide and setup instructions
